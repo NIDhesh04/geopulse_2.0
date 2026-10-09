@@ -1,0 +1,6 @@
+/db @member1
+/api @member2
+docker-compose.yml @member2
+/worker @member3
+/sim @member4
+/web @member4
