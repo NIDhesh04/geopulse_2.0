@@ -1,4 +1,4 @@
-.PHONY: up down test logs
+.PHONY: up down test logs demo
 
 up:
 	docker compose up -d
@@ -11,3 +11,6 @@ test:
 
 logs:
 	docker compose logs -f
+
+demo:
+	docker compose up -d --build

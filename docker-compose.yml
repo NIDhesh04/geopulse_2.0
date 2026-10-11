@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   db:
-    image: postgis/postgis:latest
+    image: pgrouting/pgrouting:latest
     environment:
       POSTGRES_USER: geopulse
       POSTGRES_PASSWORD: password
@@ -27,6 +27,25 @@ services:
     environment:
       - DATABASE_URL=postgresql://geopulse:password@db:5432/geopulse_db
       - REDIS_URL=redis://redis:6379
+
+  worker:
+    build: .
+    command: ["python", "-m", "worker.main"]
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://geopulse:password@db:5432/geopulse_db
+      - REDIS_URL=redis://redis:6379
+
+  simulator:
+    build: .
+    command: ["python", "-m", "sim.run", "--vehicles", "50", "--ticks", "600"]
+    depends_on:
+      - api
+    environment:
+      - DATABASE_URL=postgresql://geopulse:password@db:5432/geopulse_db
+      - WS_URL=ws://api:8000/ws/ingest
 
 volumes:
   pgdata:

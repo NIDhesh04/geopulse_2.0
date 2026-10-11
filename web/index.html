@@ -6,32 +6,188 @@
     <title>GeoPulse Map</title>
     
     <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     
     <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     
     <style>
-        body { margin: 0; padding: 0; }
+        body { margin: 0; padding: 0; font-family: sans-serif; }
         #map { height: 100vh; width: 100vw; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+        }
+        button {
+            padding: 8px 12px;
+            background: #ff7800;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        button:hover { background: #e06900; }
     </style>
 </head>
 <body>
+    <div id="controls">
+        <p style="margin-top:0;">Click map twice to route.</p>
+        <button onclick="clearRoute()">Clear Route</button>
+    </div>
     <div id="map"></div>
 
     <script>
-        // Initialize map centered on downtown Chicago
         var map = L.map('map').setView([41.8825, -87.6250], 14);
 
-        // Add OpenStreetMap base layer
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            attribution: '&copy; OpenStreetMap'
         }).addTo(map);
 
-        // Bounding box: 41.8750,-87.6350,41.8900,-87.6150
         var bounds = [[41.8750, -87.6350], [41.8900, -87.6150]];
-        L.rectangle(bounds, {color: "#ff7800", weight: 1}).addTo(map);
+        L.rectangle(bounds, {color: "#ff7800", weight: 1, fill: false}).addTo(map);
+
+        var vehicleMarkers = {};
+        var routeLayer = null;
+        var startMarker = null;
+        var endMarker = null;
+        
+        var congestionLayers = {};
+        var edgeGeometries = {}; // edge_id -> [[lat1, lon1], [lat2, lon2]]
+        var nodeMap = {}; // node_id -> [lat, lon]
+
+        // Load graph data to map edge_id to coordinates
+        async function loadGraph() {
+            try {
+                const response = await fetch('../sim/graph.json');
+                const graph = await response.json();
+                
+                graph.nodes.forEach(n => nodeMap[n.id] = [n.lat, n.lon]);
+                
+                graph.edges.forEach(e => {
+                    const start = nodeMap[e.source];
+                    const end = nodeMap[e.target];
+                    if (start && end) {
+                        edgeGeometries[e.id] = [start, end];
+                    }
+                });
+                console.log("Graph loaded. Edges:", Object.keys(edgeGeometries).length);
+            } catch (err) {
+                console.error("Failed to load graph.json", err);
+            }
+        }
+        loadGraph();
+
+        // 1. Vehicle Polling
+        async function fetchVehicles() {
+            try {
+                const response = await fetch('http://localhost:8000/vehicles');
+                const data = await response.json();
+                
+                for (const [vid, state] of Object.entries(data)) {
+                    if (state.lat && state.lon) {
+                        if (vehicleMarkers[vid]) {
+                            vehicleMarkers[vid].setLatLng([state.lat, state.lon]);
+                        } else {
+                            vehicleMarkers[vid] = L.circleMarker([state.lat, state.lon], {
+                                radius: 4, color: '#3388ff', fillOpacity: 0.8
+                            }).addTo(map);
+                        }
+                    }
+                }
+            } catch (error) { }
+        }
+        setInterval(fetchVehicles, 1500);
+
+        // 2. Multipliers Polling
+        async function fetchMultipliers() {
+            try {
+                const response = await fetch('http://localhost:8000/multipliers');
+                const data = await response.json(); // edge_id -> multiplier
+                
+                // Clear old congestion lines
+                for (const edgeId in congestionLayers) {
+                    map.removeLayer(congestionLayers[edgeId]);
+                }
+                congestionLayers = {};
+                
+                // Draw new congestion
+                for (const [edgeId, mult] of Object.entries(data)) {
+                    if (mult >= 1.5 && edgeGeometries[edgeId]) {
+                        const color = mult >= 3.0 ? 'red' : 'yellow';
+                        const weight = mult >= 3.0 ? 5 : 4;
+                        
+                        congestionLayers[edgeId] = L.polyline(edgeGeometries[edgeId], {
+                            color: color,
+                            weight: weight,
+                            opacity: 0.7
+                        }).addTo(map);
+                    }
+                }
+            } catch (error) { }
+        }
+        setInterval(fetchMultipliers, 2000);
+
+        // 3. Interactive Routing
+        map.on('click', function(e) {
+            if (!startMarker) {
+                startMarker = L.marker(e.latlng).addTo(map).bindPopup("Start").openPopup();
+            } else if (!endMarker) {
+                endMarker = L.marker(e.latlng).addTo(map).bindPopup("End").openPopup();
+                calculateRoute();
+            }
+        });
+
+        function clearRoute() {
+            if (startMarker) map.removeLayer(startMarker);
+            if (endMarker) map.removeLayer(endMarker);
+            if (routeLayer) map.removeLayer(routeLayer);
+            startMarker = null;
+            endMarker = null;
+            routeLayer = null;
+        }
+
+        async function calculateRoute() {
+            if (!startMarker || !endMarker) return;
+            const start = startMarker.getLatLng();
+            const end = endMarker.getLatLng();
+            
+            const url = `http://localhost:8000/route?src_lat=${start.lat}&src_lon=${start.lng}&dst_lat=${end.lat}&dst_lon=${end.lng}`;
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert("Routing error: " + data.error);
+                    return;
+                }
+                
+                // Reconstruct polyline from sequence of nodes
+                const pathCoords = [];
+                data.path.forEach(step => {
+                    const nodeId = step.node;
+                    if (nodeMap[nodeId]) {
+                        pathCoords.push(nodeMap[nodeId]);
+                    }
+                });
+                
+                if (routeLayer) map.removeLayer(routeLayer);
+                
+                if (pathCoords.length > 0) {
+                    routeLayer = L.polyline(pathCoords, {color: 'blue', weight: 6, opacity: 0.8}).addTo(map);
+                    map.fitBounds(routeLayer.getBounds(), {padding: [50, 50]});
+                }
+                
+            } catch (error) {
+                console.error("Routing failed:", error);
+            }
+        }
     </script>
 </body>
 </html>

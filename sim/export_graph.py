@@ -10,8 +10,8 @@ async def export_graph():
     try:
         conn = await asyncpg.connect(db_url)
         
-        nodes_query = "SELECT id, lon, lat FROM ways_vertices_pgr"
-        edges_query = "SELECT id, source_node_id as source, target_node_id as target, length_m as length FROM ways"
+        nodes_query = "SELECT id, lon::float, lat::float FROM ways_vertices_pgr"
+        edges_query = "SELECT gid as id, source, target, length_m as length FROM ways"
         
         nodes = await conn.fetch(nodes_query)
         edges = await conn.fetch(edges_query)

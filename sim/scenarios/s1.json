@@ -1,0 +1,7 @@
+{
+  "name": "S1_control",
+  "duration_s": 600,
+  "vehicles": 50,
+  "demand_rate_vpm": 30,
+  "incident": null
+}

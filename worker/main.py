@@ -1,8 +1,14 @@
 import os
+import json
 import time
 import asyncio
+import logging
 import redis.asyncio as redis
-from worker.fake_routing import FakeRouting
+import redis.exceptions as redis_exceptions
+from api.routing import RoutingService
+
+logging.basicConfig(level=logging.INFO, format='{"time": "%(asctime)s", "level": "%(levelname)s", "message": "%(message)s"}')
+logger = logging.getLogger("worker")
 
 class CongestionWorker:
     def __init__(self, routing_service, redis_url: str):
@@ -28,15 +34,16 @@ class CongestionWorker:
         await self.routing.connect()
         try:
             await self.r.xgroup_create(self.stream_name, self.group_name, id='0', mkstream=True)
-        except redis.exceptions.ResponseError as e:
+        except redis_exceptions.ResponseError as e:
             if "BUSYGROUP" not in str(e):
                 raise
 
     async def run(self):
-        print("Worker started...")
+        logger.info("Worker started...")
         while True:
             try:
-                # Block for 1 second waiting for new messages
+                # Update heartbeat on each loop iteration
+                await self.r.set("worker:heartbeat", int(time.time()), ex=120)
                 streams = await self.r.xreadgroup(
                     self.group_name, 
                     self.consumer_name, 
@@ -51,12 +58,15 @@ class CongestionWorker:
                 messages = streams[0][1]
                 await self.process_batch(messages)
             except Exception as e:
-                print(f"Worker loop error: {e}")
-                await asyncio.sleep(1)
+                logger.error(f"Worker loop error: {e}")
+                raise  # Raise to trigger run_forever backoff
 
     async def process_batch(self, messages):
+        # Update heartbeat when processing batch
+        await self.r.set("worker:heartbeat", int(time.time()), ex=120)
         valid_pings = []
         msg_ids_to_ack = []
+        vehicles_state = {}
         
         for msg_id, payload in messages:
             try:
@@ -68,6 +78,13 @@ class CongestionWorker:
                     'ts': int(payload['ts'])
                 }
                 
+                # State update tracking
+                vehicles_state[ping['vehicle_id']] = json.dumps({
+                    'lat': ping['lat'],
+                    'lon': ping['lon'],
+                    'speed_kmh': ping['speed']
+                })
+                
                 # Snap to edge
                 edge = await self.routing.snap_to_edge(ping['lat'], ping['lon'])
                 if edge:
@@ -76,9 +93,12 @@ class CongestionWorker:
                 msg_ids_to_ack.append(msg_id)
 
             except (KeyError, ValueError) as e:
-                # Dead-letter queue
                 await self.r.xadd(self.dead_stream, payload)
                 msg_ids_to_ack.append(msg_id)
+
+        if vehicles_state:
+            # Bulk HSET
+            await self.r.hset("vehicles:latest", mapping=vehicles_state)
 
         if valid_pings:
             new_multipliers = self.calculate_multipliers(valid_pings)
@@ -95,7 +115,6 @@ class CongestionWorker:
             await self.r.xack(self.stream_name, self.group_name, *msg_ids_to_ack)
 
     def calculate_multipliers(self, pings):
-        # Group by edge
         edge_pings = {}
         for p in pings:
             edge_pings.setdefault(p['edge_id'], []).append(p)
@@ -116,11 +135,24 @@ class CongestionWorker:
             
         return new_mults
 
-async def main():
+async def run_forever():
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    worker = CongestionWorker(FakeRouting(), redis_url)
-    await worker.setup()
-    await worker.run()
+    db_url = os.getenv("DATABASE_URL", "postgresql://geopulse:password@localhost:5432/geopulse_db")
+    
+    routing_service = RoutingService(db_url)
+    worker = CongestionWorker(routing_service, redis_url)
+    
+    attempt = 0
+    while True:
+        try:
+            logger.info(f"Setting up worker (attempt {attempt + 1})")
+            await worker.setup()
+            await worker.run()
+        except Exception as e:
+            delay = min(60, 2 ** attempt)
+            logger.error(f"Worker crashed: {e}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
+            attempt += 1
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_forever())
