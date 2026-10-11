@@ -3,3 +3,6 @@ uvicorn[standard]
 redis
 websockets
 asyncpg
+httpx
+requests
+matplotlib

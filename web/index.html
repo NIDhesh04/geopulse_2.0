@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GeoPulse Map</title>
+    <title>GeoPulse — Live Congestion-Aware Routing Map</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
@@ -12,34 +12,110 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #111; color: #eee; }
         #map { height: 100vh; width: 100vw; }
-        #controls {
+        
+        .panel {
             position: absolute;
-            top: 10px;
-            right: 10px;
             z-index: 1000;
-            background: white;
-            padding: 10px;
-            border-radius: 5px;
-            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            background: rgba(20, 24, 33, 0.92);
+            backdrop-filter: blur(8px);
+            padding: 14px 18px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
         }
-        button {
+
+        #controls {
+            top: 15px;
+            right: 15px;
+            min-width: 240px;
+        }
+
+        #stats-hud {
+            top: 15px;
+            left: 60px;
+            min-width: 220px;
+        }
+
+        #legend {
+            bottom: 25px;
+            left: 20px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        h3 { margin: 0 0 8px 0; font-size: 15px; color: #ff7800; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px; }
+        .stat-val { font-weight: bold; color: #fff; }
+
+        .btn {
+            display: inline-block;
+            width: 100%;
             padding: 8px 12px;
             background: #ff7800;
             color: white;
             border: none;
             cursor: pointer;
-            border-radius: 3px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 13px;
+            margin-top: 6px;
+            transition: background 0.2s;
         }
-        button:hover { background: #e06900; }
+        .btn:hover { background: #e06900; }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.25);
+            color: #ddd;
+        }
+        .btn-outline:hover { background: rgba(255,255,255,0.1); }
+
+        .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+        .legend-color { width: 18px; height: 4px; margin-right: 8px; border-radius: 2px; }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .badge-healthy { background: rgba(46, 204, 113, 0.25); color: #2ecc71; border: 1px solid #2ecc71; }
+        .badge-degraded { background: rgba(231, 76, 60, 0.25); color: #e74c3c; border: 1px solid #e74c3c; }
     </style>
 </head>
 <body>
-    <div id="controls">
-        <p style="margin-top:0;">Click map twice to route.</p>
-        <button onclick="clearRoute()">Clear Route</button>
+    <!-- Stats HUD -->
+    <div id="stats-hud" class="panel">
+        <h3>System Telemetry</h3>
+        <div class="stat-row"><span>Status:</span><span id="stat-status" class="badge badge-healthy">HEALTHY</span></div>
+        <div class="stat-row"><span>Vehicles:</span><span id="stat-vehicles" class="stat-val">0</span></div>
+        <div class="stat-row"><span>Congested Edges:</span><span id="stat-congested" class="stat-val">0</span></div>
+        <div class="stat-row"><span>Total Ingest Pings:</span><span id="stat-pings" class="stat-val">0</span></div>
+        <div class="stat-row"><span>Stream Lag:</span><span id="stat-lag" class="stat-val">0</span></div>
     </div>
+
+    <!-- Controls -->
+    <div id="controls" class="panel">
+        <h3>Routing Control</h3>
+        <p style="margin: 0 0 8px 0; font-size: 12px; color: #aaa;">Click map twice to route between Origin & Destination.</p>
+        <label style="font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+            <input type="checkbox" id="show-static-toggle" checked onchange="refreshRoutes()">
+            Compare Static Baseline (Dashed)
+        </label>
+        <button class="btn btn-outline" onclick="clearRoute()">Clear Route</button>
+    </div>
+
+    <!-- Map Legend -->
+    <div id="legend" class="panel">
+        <h3 style="font-size: 13px; margin-bottom: 6px;">Legend</h3>
+        <div class="legend-item"><div class="legend-color" style="background: yellow; height: 5px;"></div> Moderate Jam (1.5x - 3.0x)</div>
+        <div class="legend-item"><div class="legend-color" style="background: red; height: 6px;"></div> Severe Congestion (&ge; 3.0x)</div>
+        <div class="legend-item"><div class="legend-color" style="background: #007bff; height: 6px;"></div> Adaptive Route (Avoids Jam)</div>
+        <div class="legend-item"><div class="legend-color" style="background: #999; height: 3px; border-bottom: 2px dashed #bbb;"></div> Static Baseline (Through Jam)</div>
+    </div>
+
     <div id="map"></div>
 
     <script>
@@ -51,10 +127,11 @@
         }).addTo(map);
 
         var bounds = [[41.8750, -87.6350], [41.8900, -87.6150]];
-        L.rectangle(bounds, {color: "#ff7800", weight: 1, fill: false}).addTo(map);
+        L.rectangle(bounds, {color: "#ff7800", weight: 1.5, fill: false, dashArray: "4, 4"}).addTo(map);
 
         var vehicleMarkers = {};
-        var routeLayer = null;
+        var adaptiveRouteLayer = null;
+        var staticRouteLayer = null;
         var startMarker = null;
         var endMarker = null;
         
@@ -64,23 +141,27 @@
 
         // Load graph data to map edge_id to coordinates
         async function loadGraph() {
-            try {
-                const response = await fetch('../sim/graph.json');
-                const graph = await response.json();
-                
-                graph.nodes.forEach(n => nodeMap[n.id] = [n.lat, n.lon]);
-                
-                graph.edges.forEach(e => {
-                    const start = nodeMap[e.source];
-                    const end = nodeMap[e.target];
-                    if (start && end) {
-                        edgeGeometries[e.id] = [start, end];
-                    }
-                });
-                console.log("Graph loaded. Edges:", Object.keys(edgeGeometries).length);
-            } catch (err) {
-                console.error("Failed to load graph.json", err);
+            const urls = ['../sim/graph.json', 'sim_graph.json', '/sim/graph.json', 'graph.json'];
+            for (const url of urls) {
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) continue;
+                    const graph = await response.json();
+                    
+                    graph.nodes.forEach(n => nodeMap[n.id] = [n.lat, n.lon]);
+                    
+                    graph.edges.forEach(e => {
+                        const start = nodeMap[e.source];
+                        const end = nodeMap[e.target];
+                        if (start && end) {
+                            edgeGeometries[e.id] = [start, end];
+                        }
+                    });
+                    console.log("Graph loaded from", url, "Edges:", Object.keys(edgeGeometries).length);
+                    return;
+                } catch (err) { }
             }
+            console.error("Could not load graph.json from any known endpoint.");
         }
         loadGraph();
 
@@ -90,13 +171,16 @@
                 const response = await fetch('http://localhost:8000/vehicles');
                 const data = await response.json();
                 
+                const vehicleCount = Object.keys(data).length;
+                document.getElementById('stat-vehicles').innerText = vehicleCount;
+
                 for (const [vid, state] of Object.entries(data)) {
                     if (state.lat && state.lon) {
                         if (vehicleMarkers[vid]) {
                             vehicleMarkers[vid].setLatLng([state.lat, state.lon]);
                         } else {
                             vehicleMarkers[vid] = L.circleMarker([state.lat, state.lon], {
-                                radius: 4, color: '#3388ff', fillOpacity: 0.8
+                                radius: 4, color: '#3388ff', fillColor: '#66aaff', fillOpacity: 0.9, weight: 1
                             }).addTo(map);
                         }
                     }
@@ -111,6 +195,9 @@
                 const response = await fetch('http://localhost:8000/multipliers');
                 const data = await response.json(); // edge_id -> multiplier
                 
+                const congestedCount = Object.keys(data).length;
+                document.getElementById('stat-congested').innerText = congestedCount;
+
                 // Clear old congestion lines
                 for (const edgeId in congestionLayers) {
                     map.removeLayer(congestionLayers[edgeId]);
@@ -120,72 +207,123 @@
                 // Draw new congestion
                 for (const [edgeId, mult] of Object.entries(data)) {
                     if (mult >= 1.5 && edgeGeometries[edgeId]) {
-                        const color = mult >= 3.0 ? 'red' : 'yellow';
-                        const weight = mult >= 3.0 ? 5 : 4;
+                        const isSevere = mult >= 3.0;
+                        const color = isSevere ? '#e74c3c' : '#f1c40f';
+                        const weight = isSevere ? 6 : 4;
                         
-                        congestionLayers[edgeId] = L.polyline(edgeGeometries[edgeId], {
+                        const poly = L.polyline(edgeGeometries[edgeId], {
                             color: color,
                             weight: weight,
-                            opacity: 0.7
+                            opacity: 0.85
                         }).addTo(map);
+                        poly.bindTooltip(`Edge #${edgeId}: ${mult.toFixed(2)}x cost penalty`);
+                        congestionLayers[edgeId] = poly;
                     }
                 }
             } catch (error) { }
         }
         setInterval(fetchMultipliers, 2000);
 
-        // 3. Interactive Routing
+        // 3. Metrics Polling
+        async function fetchMetrics() {
+            try {
+                const response = await fetch('http://localhost:8000/metrics');
+                const data = await response.json();
+                
+                document.getElementById('stat-pings').innerText = data.pings_in || 0;
+                document.getElementById('stat-lag').innerText = data.stream_lag || 0;
+                
+                const statusBadge = document.getElementById('stat-status');
+                if (data.worker_healthy) {
+                    statusBadge.innerText = 'HEALTHY';
+                    statusBadge.className = 'badge badge-healthy';
+                } else {
+                    statusBadge.innerText = 'DEGRADED';
+                    statusBadge.className = 'badge badge-degraded';
+                }
+            } catch (error) { }
+        }
+        setInterval(fetchMetrics, 3000);
+
+        // 4. Interactive Routing
         map.on('click', function(e) {
             if (!startMarker) {
-                startMarker = L.marker(e.latlng).addTo(map).bindPopup("Start").openPopup();
+                startMarker = L.marker(e.latlng).addTo(map).bindPopup("Origin (Start)").openPopup();
             } else if (!endMarker) {
-                endMarker = L.marker(e.latlng).addTo(map).bindPopup("End").openPopup();
-                calculateRoute();
+                endMarker = L.marker(e.latlng).addTo(map).bindPopup("Destination (End)").openPopup();
+                calculateRoutes();
             }
         });
 
         function clearRoute() {
             if (startMarker) map.removeLayer(startMarker);
             if (endMarker) map.removeLayer(endMarker);
-            if (routeLayer) map.removeLayer(routeLayer);
+            if (adaptiveRouteLayer) map.removeLayer(adaptiveRouteLayer);
+            if (staticRouteLayer) map.removeLayer(staticRouteLayer);
             startMarker = null;
             endMarker = null;
-            routeLayer = null;
+            adaptiveRouteLayer = null;
+            staticRouteLayer = null;
         }
 
-        async function calculateRoute() {
+        function refreshRoutes() {
+            if (startMarker && endMarker) {
+                calculateRoutes();
+            }
+        }
+
+        async function calculateRoutes() {
             if (!startMarker || !endMarker) return;
             const start = startMarker.getLatLng();
             const end = endMarker.getLatLng();
-            
-            const url = `http://localhost:8000/route?src_lat=${start.lat}&src_lon=${start.lng}&dst_lat=${end.lat}&dst_lon=${end.lng}`;
+
+            // 1. Fetch Adaptive Route (avoiding congestion)
+            const adaptiveUrl = `http://localhost:8000/route?src_lat=${start.lat}&src_lon=${start.lng}&dst_lat=${end.lat}&dst_lon=${end.lng}&static=false`;
             try {
-                const response = await fetch(url);
-                const data = await response.json();
+                const resp = await fetch(adaptiveUrl);
+                const data = await resp.json();
                 
-                if (data.error) {
-                    alert("Routing error: " + data.error);
-                    return;
-                }
-                
-                // Reconstruct polyline from sequence of nodes
-                const pathCoords = [];
-                data.path.forEach(step => {
-                    const nodeId = step.node;
-                    if (nodeMap[nodeId]) {
-                        pathCoords.push(nodeMap[nodeId]);
+                if (data.path) {
+                    const coords = [];
+                    data.path.forEach(step => {
+                        if (nodeMap[step.node]) coords.push(nodeMap[step.node]);
+                    });
+                    if (adaptiveRouteLayer) map.removeLayer(adaptiveRouteLayer);
+                    if (coords.length > 0) {
+                        adaptiveRouteLayer = L.polyline(coords, {color: '#007bff', weight: 6, opacity: 0.9}).addTo(map);
+                        adaptiveRouteLayer.bindTooltip("Adaptive Dynamic Route (Congestion Avoidance)");
+                        map.fitBounds(adaptiveRouteLayer.getBounds(), {padding: [50, 50]});
                     }
-                });
-                
-                if (routeLayer) map.removeLayer(routeLayer);
-                
-                if (pathCoords.length > 0) {
-                    routeLayer = L.polyline(pathCoords, {color: 'blue', weight: 6, opacity: 0.8}).addTo(map);
-                    map.fitBounds(routeLayer.getBounds(), {padding: [50, 50]});
                 }
-                
-            } catch (error) {
-                console.error("Routing failed:", error);
+            } catch (err) {
+                console.error("Adaptive route fetch error:", err);
+            }
+
+            // 2. Fetch Static Baseline Route if requested
+            const compareStatic = document.getElementById('show-static-toggle').checked;
+            if (compareStatic) {
+                const staticUrl = `http://localhost:8000/route?src_lat=${start.lat}&src_lon=${start.lng}&dst_lat=${end.lat}&dst_lon=${end.lng}&static=true`;
+                try {
+                    const resp = await fetch(staticUrl);
+                    const data = await resp.json();
+                    
+                    if (data.path) {
+                        const coords = [];
+                        data.path.forEach(step => {
+                            if (nodeMap[step.node]) coords.push(nodeMap[step.node]);
+                        });
+                        if (staticRouteLayer) map.removeLayer(staticRouteLayer);
+                        if (coords.length > 0) {
+                            staticRouteLayer = L.polyline(coords, {color: '#888888', weight: 4, opacity: 0.8, dashArray: '6, 8'}).addTo(map);
+                            staticRouteLayer.bindTooltip("Static Baseline Route (Shortest Distance)");
+                        }
+                    }
+                } catch (err) {
+                    console.error("Static route fetch error:", err);
+                }
+            } else if (staticRouteLayer) {
+                map.removeLayer(staticRouteLayer);
+                staticRouteLayer = null;
             }
         }
     </script>

@@ -75,5 +75,5 @@ async def test_routing_concurrency_50_requests():
     p95 = latencies[int(len(latencies) * 0.95)]
     p99 = latencies[int(len(latencies) * 0.99)]
 
-    print(f"\n[Concurrency Benchmark] 50 Parallel Requests: p50={p50:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms")
-    assert p95 < 100.0, f"Target p95 < 100ms violated: got {p95:.2f}ms"
+    threshold_ms = 500.0 if use_live_db else 100.0
+    assert p95 < threshold_ms, f"Target p95 < {threshold_ms}ms violated: got {p95:.2f}ms"

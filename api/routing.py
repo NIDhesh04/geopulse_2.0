@@ -1,3 +1,4 @@
+import asyncio
 import asyncpg
 
 class RoutingService:
@@ -7,15 +8,17 @@ class RoutingService:
 
     async def connect(self):
         if not self.pool:
-            self.pool = await asyncpg.create_pool(self.db_url)
+            self.pool = await asyncpg.create_pool(self.db_url, min_size=10, max_size=50)
 
     async def close(self):
         if self.pool:
             await self.pool.close()
 
     async def route(self, start_lat: float, start_lon: float, end_lat: float, end_lon: float, static: bool = False):
-        start_edge = await self.snap_to_edge(start_lat, start_lon)
-        end_edge = await self.snap_to_edge(end_lat, end_lon)
+        start_edge, end_edge = await asyncio.gather(
+            self.snap_to_edge(start_lat, start_lon),
+            self.snap_to_edge(end_lat, end_lon)
+        )
         
         if not start_edge or not end_edge:
             return None

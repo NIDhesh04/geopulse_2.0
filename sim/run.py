@@ -157,7 +157,12 @@ async def run_simulation(args):
         random.seed(args.seed)
         
     ws_url = os.getenv("WS_URL", "ws://localhost:8000/ws/ingest")
-    route_api_url = os.getenv("ROUTE_API_URL", "http://localhost:8000/route")
+    route_api_url = os.getenv("ROUTE_API_URL")
+    if not route_api_url:
+        if "api:8000" in ws_url:
+            route_api_url = "http://api:8000/route"
+        else:
+            route_api_url = "http://localhost:8000/route"
 
     # Load scenario configuration if provided
     scenario_incident = None
