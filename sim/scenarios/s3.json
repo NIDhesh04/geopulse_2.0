@@ -3,6 +3,7 @@
   "duration_s": 600,
   "vehicles": 100,
   "demand_rate_vpm": 60,
+  "seed": 777,
   "surge": {
     "start_s": 60,
     "end_s": 360,

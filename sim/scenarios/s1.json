@@ -3,5 +3,6 @@
   "duration_s": 600,
   "vehicles": 50,
   "demand_rate_vpm": 30,
+  "seed": 42,
   "incident": null
 }

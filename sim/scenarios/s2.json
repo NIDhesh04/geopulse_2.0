@@ -3,6 +3,7 @@
   "duration_s": 600,
   "vehicles": 60,
   "demand_rate_vpm": 30,
+  "seed": 101,
   "incident": {
     "edge_id": 1420,
     "start_s": 120,

@@ -190,6 +190,9 @@ async def run_simulation(args):
                     total_ticks = sc_data["duration_s"]
                 if "vehicles" in sc_data and args.vehicles == 10: # not overridden explicitly
                     num_vehicles = sc_data["vehicles"]
+                if "seed" in sc_data and args.seed is None:
+                    random.seed(sc_data["seed"])
+                    print(f"Using fixed scenario seed: {sc_data['seed']}")
                 scenario_incident = sc_data.get("incident")
         else:
             print(f"Warning: scenario file {args.scenario} not found. Running with defaults.")
@@ -216,7 +219,11 @@ async def run_simulation(args):
         print("Graph not found. Run export_graph.py first.")
         return
 
-    print(f"Starting simulation: {num_vehicles} vehicles for {total_ticks} ticks...")
+    is_continuous = getattr(args, "continuous", False) or total_ticks <= 0
+    if is_continuous:
+        print(f"Starting continuous simulation: {num_vehicles} vehicles running indefinitely...")
+    else:
+        print(f"Starting simulation: {num_vehicles} vehicles for {total_ticks} ticks...")
     if scenario_incident:
         print(f"Active incident: Edge {scenario_incident.get('edge_id')} slowed to {scenario_incident.get('speed_kmh')} km/h between t={scenario_incident.get('start_s')}s and t={scenario_incident.get('end_s')}s")
 
@@ -228,7 +235,11 @@ async def run_simulation(args):
         ))
 
     try:
-        await asyncio.sleep(total_ticks)
+        if is_continuous:
+            while True:
+                await asyncio.sleep(3600)
+        else:
+            await asyncio.sleep(total_ticks)
     except KeyboardInterrupt:
         pass
     finally:
@@ -239,11 +250,12 @@ async def run_simulation(args):
 
 def main():
     parser = argparse.ArgumentParser(description="GeoPulse Fleet Simulator with BPR Dynamic Congestion")
-    parser.add_argument("--ticks", type=int, default=100, help="Number of ticks to simulate")
+    parser.add_argument("--ticks", type=int, default=100, help="Number of ticks to simulate (use 0 for continuous)")
     parser.add_argument("--vehicles", type=int, default=10, help="Number of vehicles to simulate")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     parser.add_argument("--slow-segment", type=str, help="Format: ID@T1..T2 to force slow speed on edge")
     parser.add_argument("--scenario", type=str, help="Path or name of scenario JSON (e.g. sim/scenarios/s2.json)")
+    parser.add_argument("--continuous", action="store_true", help="Run simulation continuously without terminating")
     
     args = parser.parse_args()
     asyncio.run(run_simulation(args))

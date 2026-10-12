@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GeoPulse — Live Congestion-Aware Routing Map</title>
+    <title>GeoPulse — Live Congestion-Aware Routing & Reliability Map</title>
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
@@ -12,122 +17,344 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     
     <style>
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #111; color: #eee; }
-        #map { height: 100vh; width: 100vw; }
+        :root {
+            --bg-glass: rgba(15, 23, 42, 0.90);
+            --border-glass: rgba(255, 255, 255, 0.12);
+            --accent-blue: #3b82f6;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-green: #10b981;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #090d16;
+            color: var(--text-main);
+            overflow: hidden;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100vw;
+            background: #090d16;
+        }
         
         .panel {
             position: absolute;
             z-index: 1000;
-            background: rgba(20, 24, 33, 0.92);
-            backdrop-filter: blur(8px);
-            padding: 14px 18px;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: var(--bg-glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 16px 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+            border: 1px solid var(--border-glass);
+            transition: all 0.2s ease-in-out;
         }
 
+        /* Controls Panel */
         #controls {
-            top: 15px;
-            right: 15px;
-            min-width: 240px;
+            top: 20px;
+            right: 20px;
+            width: 290px;
         }
 
+        /* HUD Telemetry Panel */
         #stats-hud {
-            top: 15px;
-            left: 60px;
-            min-width: 220px;
+            top: 20px;
+            left: 20px;
+            width: 280px;
         }
 
+        /* Overlay Legend */
         #legend {
             bottom: 25px;
             left: 20px;
             font-size: 12px;
             line-height: 1.6;
+            min-width: 240px;
         }
 
-        h3 { margin: 0 0 8px 0; font-size: 15px; color: #ff7800; text-transform: uppercase; letter-spacing: 0.5px; }
-        .stat-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px; }
-        .stat-val { font-weight: bold; color: #fff; }
+        h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            font-weight: 700;
+            color: #38bdf8;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 7px;
+            font-size: 13px;
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .stat-val {
+            font-weight: 700;
+            color: #ffffff;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Segmented / Toggle switch */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(30, 41, 59, 0.7);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+
+        .toggle-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 22px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #334155;
+            transition: .3s;
+            border-radius: 22px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--accent-blue);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(22px);
+        }
 
         .btn {
             display: inline-block;
             width: 100%;
-            padding: 8px 12px;
-            background: #ff7800;
+            box-sizing: border-box;
+            padding: 9px 14px;
+            background: #2563eb;
             color: white;
             border: none;
             cursor: pointer;
-            border-radius: 4px;
+            border-radius: 6px;
             font-weight: 600;
             font-size: 13px;
             margin-top: 6px;
-            transition: background 0.2s;
+            transition: background 0.15s ease, transform 0.1s ease;
+            text-align: center;
         }
-        .btn:hover { background: #e06900; }
+        .btn:hover { background: #1d4ed8; transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
         .btn-outline {
             background: transparent;
-            border: 1px solid rgba(255,255,255,0.25);
-            color: #ddd;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #cbd5e1;
         }
-        .btn-outline:hover { background: rgba(255,255,255,0.1); }
+        .btn-outline:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.35);
+        }
 
-        .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
-        .legend-color { width: 18px; height: 4px; margin-right: 8px; border-radius: 2px; }
+        /* Legend styling */
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #cbd5e1;
+        }
+        .legend-color {
+            width: 20px;
+            height: 5px;
+            margin-right: 10px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
 
+        /* Status Badges */
         .badge {
             display: inline-block;
-            padding: 2px 6px;
-            border-radius: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
             font-size: 11px;
-            font-weight: bold;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
         }
-        .badge-healthy { background: rgba(46, 204, 113, 0.25); color: #2ecc71; border: 1px solid #2ecc71; }
-        .badge-degraded { background: rgba(231, 76, 60, 0.25); color: #e74c3c; border: 1px solid #e74c3c; }
+        .badge-healthy {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+        }
+        .badge-stale {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+        }
+        .badge-degraded {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        /* Route comparison info card */
+        #route-metrics {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
-    <!-- Stats HUD -->
+    <!-- Floating Telemetry HUD -->
     <div id="stats-hud" class="panel">
-        <h3>System Telemetry</h3>
-        <div class="stat-row"><span>Status:</span><span id="stat-status" class="badge badge-healthy">HEALTHY</span></div>
-        <div class="stat-row"><span>Vehicles:</span><span id="stat-vehicles" class="stat-val">0</span></div>
-        <div class="stat-row"><span>Congested Edges:</span><span id="stat-congested" class="stat-val">0</span></div>
-        <div class="stat-row"><span>Total Ingest Pings:</span><span id="stat-pings" class="stat-val">0</span></div>
-        <div class="stat-row"><span>Stream Lag:</span><span id="stat-lag" class="stat-val">0</span></div>
+        <h3>
+            <span>Telemetry HUD</span>
+            <span id="stat-status" class="badge badge-healthy">HEALTHY</span>
+        </h3>
+        <div class="stat-row">
+            <span class="stat-label">Ingestion Rate:</span>
+            <span id="stat-rate" class="stat-val">0 pings/s</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Congested Edges:</span>
+            <span id="stat-congested" class="stat-val">0</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Max Multiplier:</span>
+            <span id="stat-max-mult" class="stat-val">1.00x</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Active Fleet:</span>
+            <span id="stat-vehicles" class="stat-val">0</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Total Ingested:</span>
+            <span id="stat-pings" class="stat-val">0</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Stream Lag:</span>
+            <span id="stat-lag" class="stat-val">0</span>
+        </div>
     </div>
 
-    <!-- Controls -->
+    <!-- Controls Panel -->
     <div id="controls" class="panel">
         <h3>Routing Control</h3>
-        <p style="margin: 0 0 8px 0; font-size: 12px; color: #aaa;">Click map twice to route between Origin & Destination.</p>
-        <label style="font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-            <input type="checkbox" id="show-static-toggle" checked onchange="refreshRoutes()">
-            Compare Static Baseline (Dashed)
+        <p style="margin: 0 0 10px 0; font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+            Click map twice to place Origin & Destination. Dual routes calculate simultaneously.
+        </p>
+
+        <!-- Route Mode Toggle Switch -->
+        <label class="toggle-container" for="route-mode-toggle" id="toggle-container">
+            <span class="toggle-label" id="toggle-text">Show Static Baseline</span>
+            <div class="switch">
+                <input type="checkbox" id="route-mode-toggle" checked onchange="toggleRouteMode()">
+                <span class="slider"></span>
+            </div>
         </label>
-        <button class="btn btn-outline" onclick="clearRoute()">Clear Route</button>
+
+        <button id="btn-clear" class="btn btn-outline" onclick="clearRoute()">Clear Current Route</button>
+
+        <div id="route-metrics" style="display: none;">
+            <div class="stat-row">
+                <span class="stat-label" style="color: #60a5fa;">● Adaptive Path:</span>
+                <span id="metric-adaptive-cost" class="stat-val">--</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label" style="color: #94a3b8;">┄ Static Baseline:</span>
+                <span id="metric-static-cost" class="stat-val">--</span>
+            </div>
+        </div>
     </div>
 
     <!-- Map Legend -->
     <div id="legend" class="panel">
-        <h3 style="font-size: 13px; margin-bottom: 6px;">Legend</h3>
-        <div class="legend-item"><div class="legend-color" style="background: yellow; height: 5px;"></div> Moderate Jam (1.5x - 3.0x)</div>
-        <div class="legend-item"><div class="legend-color" style="background: red; height: 6px;"></div> Severe Congestion (&ge; 3.0x)</div>
-        <div class="legend-item"><div class="legend-color" style="background: #007bff; height: 6px;"></div> Adaptive Route (Avoids Jam)</div>
-        <div class="legend-item"><div class="legend-color" style="background: #999; height: 3px; border-bottom: 2px dashed #bbb;"></div> Static Baseline (Through Jam)</div>
+        <h3 style="font-size: 13px; margin-bottom: 8px;">Network Legend</h3>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #10b981; height: 3px;"></div>
+            <span>Free Flow (1.0x)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #facc15; height: 5px;"></div>
+            <span>Moderate Congestion (1.5x - 3.0x)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #ef4444; height: 6px;"></div>
+            <span>Severe Jam (&ge; 3.0x)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #2563eb; height: 6px;"></div>
+            <span>Adaptive Route (Congestion Avoidance)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #64748b; height: 3px; border-bottom: 2px dashed #94a3b8;"></div>
+            <span>Static Baseline (Shortest Distance)</span>
+        </div>
     </div>
 
     <div id="map"></div>
 
     <script>
-        var map = L.map('map').setView([41.8825, -87.6250], 14);
+        // Initialize Leaflet map centered on Chicago Downtown Loop
+        var map = L.map('map', {zoomControl: false}).setView([41.8825, -87.6250], 14);
+        L.control.zoom({position: 'bottomright'}).addTo(map);
 
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; OpenStreetMap'
+            attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
         var bounds = [[41.8750, -87.6350], [41.8900, -87.6150]];
-        L.rectangle(bounds, {color: "#ff7800", weight: 1.5, fill: false, dashArray: "4, 4"}).addTo(map);
+        L.rectangle(bounds, {color: "#38bdf8", weight: 1.5, fill: false, dashArray: "4, 4"}).addTo(map);
 
         var vehicleMarkers = {};
         var adaptiveRouteLayer = null;
@@ -138,6 +365,9 @@
         var congestionLayers = {};
         var edgeGeometries = {}; // edge_id -> [[lat1, lon1], [lat2, lon2]]
         var nodeMap = {}; // node_id -> [lat, lon]
+
+        var previousPings = 0;
+        var previousPingsTime = Date.now();
 
         // Load graph data to map edge_id to coordinates
         async function loadGraph() {
@@ -169,6 +399,7 @@
         async function fetchVehicles() {
             try {
                 const response = await fetch('http://localhost:8000/vehicles');
+                if (!response.ok) return;
                 const data = await response.json();
                 
                 const vehicleCount = Object.keys(data).length;
@@ -180,7 +411,7 @@
                             vehicleMarkers[vid].setLatLng([state.lat, state.lon]);
                         } else {
                             vehicleMarkers[vid] = L.circleMarker([state.lat, state.lon], {
-                                radius: 4, color: '#3388ff', fillColor: '#66aaff', fillOpacity: 0.9, weight: 1
+                                radius: 4, color: '#38bdf8', fillColor: '#60a5fa', fillOpacity: 0.9, weight: 1
                             }).addTo(map);
                         }
                     }
@@ -189,14 +420,26 @@
         }
         setInterval(fetchVehicles, 1500);
 
-        // 2. Multipliers Polling
+        // 2. Multipliers Polling & Congestion Rendering
         async function fetchMultipliers() {
             try {
                 const response = await fetch('http://localhost:8000/multipliers');
+                if (!response.ok) {
+                    if (response.status === 503) {
+                        updateSystemHealth('DEGRADED');
+                    }
+                    return;
+                }
                 const data = await response.json(); // edge_id -> multiplier
                 
                 const congestedCount = Object.keys(data).length;
                 document.getElementById('stat-congested').innerText = congestedCount;
+
+                let maxMultiplier = 1.0;
+                for (const mult of Object.values(data)) {
+                    if (mult > maxMultiplier) maxMultiplier = mult;
+                }
+                document.getElementById('stat-max-mult').innerText = maxMultiplier.toFixed(2) + 'x';
 
                 // Clear old congestion lines
                 for (const edgeId in congestionLayers) {
@@ -204,11 +447,11 @@
                 }
                 congestionLayers = {};
                 
-                // Draw new congestion
+                // Draw dynamic congestion
                 for (const [edgeId, mult] of Object.entries(data)) {
                     if (mult >= 1.5 && edgeGeometries[edgeId]) {
                         const isSevere = mult >= 3.0;
-                        const color = isSevere ? '#e74c3c' : '#f1c40f';
+                        const color = isSevere ? '#ef4444' : '#facc15';
                         const weight = isSevere ? 6 : 4;
                         
                         const poly = L.polyline(edgeGeometries[edgeId], {
@@ -224,28 +467,74 @@
         }
         setInterval(fetchMultipliers, 2000);
 
-        // 3. Metrics Polling
+        // 3. Metrics & Health Polling
         async function fetchMetrics() {
             try {
                 const response = await fetch('http://localhost:8000/metrics');
+                if (!response.ok) {
+                    updateSystemHealth('DEGRADED');
+                    return;
+                }
                 const data = await response.json();
                 
-                document.getElementById('stat-pings').innerText = data.pings_in || 0;
+                const currentPings = data.pings_in || 0;
+                document.getElementById('stat-pings').innerText = currentPings.toLocaleString();
                 document.getElementById('stat-lag').innerText = data.stream_lag || 0;
-                
-                const statusBadge = document.getElementById('stat-status');
-                if (data.worker_healthy) {
-                    statusBadge.innerText = 'HEALTHY';
-                    statusBadge.className = 'badge badge-healthy';
-                } else {
-                    statusBadge.innerText = 'DEGRADED';
-                    statusBadge.className = 'badge badge-degraded';
+
+                // Ingestion Rate calculation
+                const now = Date.now();
+                const deltaSec = (now - previousPingsTime) / 1000.0;
+                if (deltaSec > 0 && previousPings > 0) {
+                    const rate = Math.max(0, Math.round((currentPings - previousPings) / deltaSec));
+                    document.getElementById('stat-rate').innerText = `${rate} pings/s`;
                 }
-            } catch (error) { }
+                previousPings = currentPings;
+                previousPingsTime = now;
+                
+                // Health Check status
+                if (data.redis === 'offline' || !data.worker_healthy) {
+                    updateSystemHealth('DEGRADED');
+                } else {
+                    // Check if costs are stale via health endpoint
+                    checkStaleness();
+                }
+            } catch (error) {
+                updateSystemHealth('DEGRADED');
+            }
         }
         setInterval(fetchMetrics, 3000);
 
-        // 4. Interactive Routing
+        async function checkStaleness() {
+            try {
+                const resp = await fetch('http://localhost:8000/health');
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    updateSystemHealth('HEALTHY');
+                } else if (data.worker === 'stale_heartbeat') {
+                    updateSystemHealth('STALE');
+                } else {
+                    updateSystemHealth('DEGRADED');
+                }
+            } catch (e) {
+                updateSystemHealth('DEGRADED');
+            }
+        }
+
+        function updateSystemHealth(status) {
+            const badge = document.getElementById('stat-status');
+            if (status === 'HEALTHY') {
+                badge.innerText = 'HEALTHY';
+                badge.className = 'badge badge-healthy';
+            } else if (status === 'STALE') {
+                badge.innerText = 'STALE (DECAYING)';
+                badge.className = 'badge badge-stale';
+            } else {
+                badge.innerText = 'DEGRADED';
+                badge.className = 'badge badge-degraded';
+            }
+        }
+
+        // 4. Interactive Routing with Dual Polyline Comparison
         map.on('click', function(e) {
             if (!startMarker) {
                 startMarker = L.marker(e.latlng).addTo(map).bindPopup("Origin (Start)").openPopup();
@@ -264,10 +553,18 @@
             endMarker = null;
             adaptiveRouteLayer = null;
             staticRouteLayer = null;
+            document.getElementById('route-metrics').style.display = 'none';
         }
 
-        function refreshRoutes() {
-            if (startMarker && endMarker) {
+        function toggleRouteMode() {
+            const showStatic = document.getElementById('route-mode-toggle').checked;
+            if (staticRouteLayer) {
+                if (showStatic) {
+                    staticRouteLayer.addTo(map);
+                } else {
+                    map.removeLayer(staticRouteLayer);
+                }
+            } else if (startMarker && endMarker) {
                 calculateRoutes();
             }
         }
@@ -277,53 +574,82 @@
             const start = startMarker.getLatLng();
             const end = endMarker.getLatLng();
 
-            // 1. Fetch Adaptive Route (avoiding congestion)
             const adaptiveUrl = `http://localhost:8000/route?src_lat=${start.lat}&src_lon=${start.lng}&dst_lat=${end.lat}&dst_lon=${end.lng}&static=false`;
+            const staticUrl = `http://localhost:8000/route?src_lat=${start.lat}&src_lon=${start.lng}&dst_lat=${end.lat}&dst_lon=${end.lng}&static=true`;
+
             try {
-                const resp = await fetch(adaptiveUrl);
-                const data = await resp.json();
-                
-                if (data.path) {
+                // Fetch adaptive route and static baseline simultaneously
+                const [adaptiveResp, staticResp] = await Promise.all([
+                    fetch(adaptiveUrl),
+                    fetch(staticUrl)
+                ]);
+
+                if (adaptiveResp.status === 503 || staticResp.status === 503) {
+                    updateSystemHealth('DEGRADED');
+                    alert("Database temporarily unavailable (HTTP 503). Retrying in 5 seconds...");
+                    return;
+                }
+
+                const [adaptiveData, staticData] = await Promise.all([
+                    adaptiveResp.json(),
+                    staticResp.json()
+                ]);
+
+                // Check staleness in route response contract
+                if (adaptiveData.costs_stale) {
+                    updateSystemHealth('STALE');
+                }
+
+                // Render Adaptive Route (Solid Blue)
+                if (adaptiveData.path) {
                     const coords = [];
-                    data.path.forEach(step => {
+                    let totalCost = 0;
+                    adaptiveData.path.forEach(step => {
                         if (nodeMap[step.node]) coords.push(nodeMap[step.node]);
+                        totalCost = step.agg_cost || totalCost;
                     });
                     if (adaptiveRouteLayer) map.removeLayer(adaptiveRouteLayer);
                     if (coords.length > 0) {
-                        adaptiveRouteLayer = L.polyline(coords, {color: '#007bff', weight: 6, opacity: 0.9}).addTo(map);
-                        adaptiveRouteLayer.bindTooltip("Adaptive Dynamic Route (Congestion Avoidance)");
+                        adaptiveRouteLayer = L.polyline(coords, {
+                            color: '#2563eb',
+                            weight: 6,
+                            opacity: 0.95
+                        }).addTo(map);
+                        adaptiveRouteLayer.bindTooltip("Adaptive Route (Dynamic Congestion Avoidance)");
                         map.fitBounds(adaptiveRouteLayer.getBounds(), {padding: [50, 50]});
+                        document.getElementById('metric-adaptive-cost').innerText = `${totalCost.toFixed(1)} cost units`;
                     }
                 }
-            } catch (err) {
-                console.error("Adaptive route fetch error:", err);
-            }
 
-            // 2. Fetch Static Baseline Route if requested
-            const compareStatic = document.getElementById('show-static-toggle').checked;
-            if (compareStatic) {
-                const staticUrl = `http://localhost:8000/route?src_lat=${start.lat}&src_lon=${start.lng}&dst_lat=${end.lat}&dst_lon=${end.lng}&static=true`;
-                try {
-                    const resp = await fetch(staticUrl);
-                    const data = await resp.json();
-                    
-                    if (data.path) {
-                        const coords = [];
-                        data.path.forEach(step => {
-                            if (nodeMap[step.node]) coords.push(nodeMap[step.node]);
+                // Render Static Baseline Route (Dashed Gray)
+                const showStatic = document.getElementById('route-mode-toggle').checked;
+                if (staticData.path) {
+                    const coords = [];
+                    let totalCost = 0;
+                    staticData.path.forEach(step => {
+                        if (nodeMap[step.node]) coords.push(nodeMap[step.node]);
+                        totalCost = step.agg_cost || totalCost;
+                    });
+                    if (staticRouteLayer) map.removeLayer(staticRouteLayer);
+                    if (coords.length > 0) {
+                        staticRouteLayer = L.polyline(coords, {
+                            color: '#64748b',
+                            weight: 4,
+                            opacity: 0.85,
+                            dashArray: '6, 8'
                         });
-                        if (staticRouteLayer) map.removeLayer(staticRouteLayer);
-                        if (coords.length > 0) {
-                            staticRouteLayer = L.polyline(coords, {color: '#888888', weight: 4, opacity: 0.8, dashArray: '6, 8'}).addTo(map);
-                            staticRouteLayer.bindTooltip("Static Baseline Route (Shortest Distance)");
+                        if (showStatic) {
+                            staticRouteLayer.addTo(map);
                         }
+                        staticRouteLayer.bindTooltip("Static Baseline Route (Unpenalized Shortest Path)");
+                        document.getElementById('metric-static-cost').innerText = `${totalCost.toFixed(1)} cost units`;
                     }
-                } catch (err) {
-                    console.error("Static route fetch error:", err);
                 }
-            } else if (staticRouteLayer) {
-                map.removeLayer(staticRouteLayer);
-                staticRouteLayer = null;
+
+                document.getElementById('route-metrics').style.display = 'block';
+
+            } catch (err) {
+                console.error("Route calculation error:", err);
             }
         }
     </script>

@@ -6,3 +6,4 @@ asyncpg
 httpx
 requests
 matplotlib
+aiohttp
